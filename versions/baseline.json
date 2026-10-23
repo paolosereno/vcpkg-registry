@@ -1,0 +1,8 @@
+{
+  "default": {
+    "qtindustrialwidgets": {
+      "baseline": "2.5.0",
+      "port-version": 0
+    }
+  }
+}

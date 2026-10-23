@@ -1,0 +1,84 @@
+# SPDX-FileCopyrightText: 2026 Paolo Sereno <paolomsereno@gmail.com>
+#
+# SPDX-License-Identifier: MIT
+
+# Checks that the version database (versions/) agrees with the ports (ports/). vcpkg's x-ci-verify-versions is not
+# used: it also wants every dependency (qtbase, vcpkg-cmake, ...) in this registry's own version database, which a
+# registry on top of vcpkg's builtin registry does not have. Instead:
+# - vcpkg x-add-version --all must change nothing: it fails when a port changed without a new version or port-version,
+#   and it writes an entry (seen by git diff) when a version is missing from versions/ or from baseline.json;
+# - every git tree in versions/ must exist and hold the version its entry declares.
+# Nothing is built here: QtIndustrialWidgets' packaging workflow installs the port from this registry and runs a
+# consumer.
+
+name: Verify
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-versions:
+    name: Verify the version database
+    runs-on: ubuntu-24.04
+    env:
+      VCPKG_REF: "2026.10.16" # vcpkg release tag (the same as in QtIndustrialWidgets' packaging workflow)
+
+    steps:
+      - name: Checkout repository (full history, for the git trees in versions/)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up vcpkg ${{ env.VCPKG_REF }}
+        run: |
+          git clone --depth 1 --branch "$VCPKG_REF" https://github.com/microsoft/vcpkg "$RUNNER_TEMP/vcpkg"
+          "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+
+      - name: Every port has its current version in versions/ (vcpkg x-add-version --all changes nothing)
+        run: |
+          "$RUNNER_TEMP/vcpkg/vcpkg" x-add-version --all --verbose \
+            --x-builtin-ports-root="$GITHUB_WORKSPACE/ports" \
+            --x-builtin-registry-versions-dir="$GITHUB_WORKSPACE/versions"
+          if ! git diff --exit-code versions/; then
+            echo "::error::versions/ is not up to date: run vcpkg x-add-version for the ports above and commit the result"
+            exit 1
+          fi
+
+      - name: Every git tree in versions/ exists and holds its version
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, subprocess, sys
+          keys = ("version", "version-semver", "version-date", "version-string")
+          failed = False
+          for path in sorted(pathlib.Path("versions").glob("?-/*.json")):
+              for entry in json.loads(path.read_text())["versions"]:
+                  tree = entry["git-tree"]
+                  declared = (next(entry[k] for k in keys if k in entry), entry.get("port-version", 0))
+                  shown = subprocess.run(["git", "show", f"{tree}:vcpkg.json"], capture_output=True, text=True)
+                  if shown.returncode != 0:
+                      print(f"::error::{path}: git tree {tree} ({declared[0]}) not found")
+                      failed = True
+                      continue
+                  manifest = json.loads(shown.stdout)
+                  found = (next(manifest[k] for k in keys if k in manifest), manifest.get("port-version", 0))
+                  if found != declared:
+                      print(f"::error::{path}: git tree {tree} holds {found}, the entry says {declared}")
+                      failed = True
+                  else:
+                      print(f"{path.stem} {declared[0]}#{declared[1]}: {tree} ok")
+          sys.exit(1 if failed else 0)
+          PY
+
+  reuse:
+    name: REUSE compliance
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: fsfe/reuse-action@v6

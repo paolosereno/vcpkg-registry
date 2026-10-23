@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: 2026 Paolo Sereno <paolomsereno@gmail.com>
+#
+# SPDX-License-Identifier: MIT
+
+version = 1
+
+# JSON files cannot hold comments: the version database (the ports carry .license files, as in QtIndustrialWidgets)
+[[annotations]]
+path = "versions/**"
+SPDX-FileCopyrightText = "2026 Paolo Sereno <paolomsereno@gmail.com>"
+SPDX-License-Identifier = "MIT"
